@@ -1,0 +1,16 @@
+# Render Blueprint: New > Blueprint > pick this repo. Then fill in the two secret values in the dashboard.
+services:
+  - type: web
+    name: dq-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DATABASE_URL        # Neon/Supabase connection string
+        sync: false
+      - key: CORS_ORIGINS        # your dashboard URL, e.g. https://dq-dashboard.vercel.app
+        sync: false

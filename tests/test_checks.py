@@ -1,0 +1,128 @@
+"""Unit tests: one pass and one fail case per check type, plus engine and contract behaviour."""
+import unittest
+from datetime import datetime
+
+import pandas as pd
+
+from dq.checks import CHECKS, Context
+from dq.contract import load_contract
+from dq.engine import run_checks
+from etl.transform import transform
+from tests.helpers import ROOT
+
+COLS = {"order_id": "string", "amount": "float", "status": "string", "order_ts": "timestamp", "email": "string"}
+
+
+def ctx(rows, history=(), as_of="2026-10-02T06:00:00"):
+    raw = pd.DataFrame(rows, dtype=str)
+    return Context(raw, transform(raw, COLS), COLS, list(history), datetime.fromisoformat(as_of))
+
+
+GOOD = [{"order_id": "A", "amount": "10.00", "status": "PAID", "order_ts": "2026-10-01T23:00:00", "email": "a@x.com"},
+        {"order_id": "B", "amount": "20.00", "status": "SHIPPED", "order_ts": "2026-10-01T22:00:00", "email": "b@x.com"}]
+
+
+def with_row(**kw):
+    return GOOD + [{**GOOD[0], "order_id": "C", **kw}]
+
+
+class CheckTests(unittest.TestCase):
+    def test_schema(self):
+        self.assertTrue(CHECKS["schema"]({}, ctx(GOOD)).passed)
+        bad = pd.DataFrame(GOOD, dtype=str).rename(columns={"amount": "total"})
+        c = Context(bad, bad, COLS, [], datetime.now())
+        o = CHECKS["schema"]({}, c)
+        self.assertFalse(o.passed)
+        self.assertIn("missing ['amount']", o.message)
+
+    def test_parseable(self):
+        self.assertTrue(CHECKS["parseable"]({}, ctx(GOOD)).passed)
+        o = CHECKS["parseable"]({}, ctx(with_row(amount="12,50", order_ts="yesterday")))
+        self.assertFalse(o.passed)
+        self.assertEqual(o.failed_idx, [2])
+
+    def test_unique(self):
+        spec = {"column": "order_id"}
+        self.assertTrue(CHECKS["unique"](spec, ctx(GOOD)).passed)
+        o = CHECKS["unique"](spec, ctx(GOOD + [GOOD[0]]))
+        self.assertFalse(o.passed)
+        self.assertEqual(len(o.failed_idx), 2)  # both copies are reported
+
+    def test_not_null(self):
+        spec = {"columns": ["order_id", "status"]}
+        self.assertTrue(CHECKS["not_null"](spec, ctx(GOOD)).passed)
+        o = CHECKS["not_null"](spec, ctx(GOOD + [{**GOOD[0], "order_id": "C", "status": None}]))
+        self.assertFalse(o.passed)
+        self.assertEqual(o.failed_idx, [2])
+
+    def test_range(self):
+        spec = {"column": "amount", "min": 0.01, "max": 100}
+        self.assertTrue(CHECKS["range"](spec, ctx(GOOD)).passed)
+        for bad in ("-5.00", "0", "100000"):
+            self.assertFalse(CHECKS["range"](spec, ctx(with_row(amount=bad))).passed, bad)
+
+    def test_accepted_values(self):
+        spec = {"column": "status", "values": ["PAID", "SHIPPED"]}
+        self.assertTrue(CHECKS["accepted_values"](spec, ctx(GOOD)).passed)
+        self.assertFalse(CHECKS["accepted_values"](spec, ctx(with_row(status="REFUNDD"))).passed)
+
+    def test_regex(self):
+        spec = {"column": "email", "pattern": r"^[^@\s]+@[^@\s]+\.[^@\s]+$"}
+        self.assertTrue(CHECKS["regex"](spec, ctx(GOOD)).passed)
+        self.assertFalse(CHECKS["regex"](spec, ctx(with_row(email="nope"))).passed)
+
+    def test_row_count_band(self):
+        spec = {"tolerance": 0.3, "window": 7, "min_history": 3}
+        self.assertTrue(CHECKS["row_count_band"](spec, ctx(GOOD, history=[2, 2, 2])).passed)
+        self.assertFalse(CHECKS["row_count_band"](spec, ctx(GOOD, history=[10, 10, 10])).passed)
+        self.assertIsNone(CHECKS["row_count_band"](spec, ctx(GOOD, history=[2])).passed)   # skipped, not passed
+        self.assertFalse(CHECKS["row_count_band"](spec, ctx([], history=[])).passed)       # empty batch always fails
+
+    def test_freshness(self):
+        spec = {"column": "order_ts", "max_age_hours": 24}
+        self.assertTrue(CHECKS["freshness"](spec, ctx(GOOD)).passed)
+        self.assertFalse(CHECKS["freshness"](spec, ctx(GOOD, as_of="2026-10-05T00:00:00")).passed)
+
+
+class EngineTests(unittest.TestCase):
+    def test_schema_failure_skips_rest_explicitly(self):
+        contract = load_contract(ROOT / "contracts" / "orders.yaml")
+        raw = pd.DataFrame(GOOD, dtype=str)[["order_id"]]
+        results = run_checks(contract, Context(raw, raw, contract["columns"], [], datetime.now()))
+        self.assertEqual(results[0].status, "FAIL")
+        self.assertTrue(all(r.status == "SKIPPED" for r in results[1:]))
+
+    def test_crashing_check_is_a_failure_not_a_pass(self):
+        contract = {"checks": [{"name": "x", "type": "unique", "column": "nope", "pillar": "correctness",
+                                "severity": "blocking"}]}
+        r = run_checks(contract, ctx(GOOD))[0]
+        self.assertEqual(r.status, "FAIL")
+        self.assertIn("crashed", r.message)
+
+
+class ContractTests(unittest.TestCase):
+    def _write(self, text):
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+        f.write(text)
+        f.close()
+        return f.name
+
+    def test_valid_contract_loads(self):
+        self.assertEqual(load_contract(ROOT / "contracts" / "orders.yaml")["dataset"], "orders")
+
+    def test_unknown_check_type_rejected(self):
+        p = self._write("dataset: d\nsource: {}\ntarget: {}\ncolumns: {a: string}\n"
+                        "checks: [{name: n, type: magic, pillar: correctness, severity: blocking}]\n")
+        with self.assertRaisesRegex(ValueError, "unknown type"):
+            load_contract(p)
+
+    def test_bad_severity_rejected(self):
+        p = self._write("dataset: d\nsource: {}\ntarget: {}\ncolumns: {a: string}\n"
+                        "checks: [{name: n, type: unique, column: a, pillar: correctness, severity: meh}]\n")
+        with self.assertRaisesRegex(ValueError, "severity"):
+            load_contract(p)
+
+
+if __name__ == "__main__":
+    unittest.main()

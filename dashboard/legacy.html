@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders data health</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#16202a;--muted:#5d6b7a;--line:#e1e5ea;--ok:#157347;--okbg:#e4f4ea;--warn:#8a5a00;--warnbg:#fff1d6;--bad:#b42318;--badbg:#fde7e5;--neutral:#4b5766;--neutralbg:#eceff3;--accent:#2457c5}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1419;--card:#171d24;--text:#e8edf2;--muted:#93a1b0;--line:#2a333d;--ok:#5fd18c;--okbg:#14301f;--warn:#f3c260;--warnbg:#3a2b0b;--bad:#ff8a80;--badbg:#401a17;--neutral:#aab6c3;--neutralbg:#222b35;--accent:#7aa2ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0}h2{font-size:16px;margin:28px 0 10px}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.banner{display:flex;gap:14px;align-items:flex-start;border-left:6px solid var(--neutral)}
+.banner .big{font-size:20px;font-weight:700}
+.banner.healthy{border-left-color:var(--ok)}.banner.degraded{border-left-color:var(--warn)}
+.banner.blocked,.banner.error{border-left-color:var(--bad)}
+.pillars{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px}
+.pillar .name{color:var(--muted);font-size:13px;text-transform:capitalize}
+.chip{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.pass,.SUCCESS,.PASS{background:var(--okbg);color:var(--ok)}
+.warn,.degraded,.RUNNING{background:var(--warnbg);color:var(--warn)}
+.fail,.BLOCKED,.ERROR,.FAIL{background:var(--badbg);color:var(--bad)}
+.unknown,.SKIPPED{background:var(--neutralbg);color:var(--neutral)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.run{cursor:pointer}tr.run:hover,tr.sel{background:var(--neutralbg)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.hint{background:var(--warnbg);color:var(--text);border-radius:6px;padding:6px 10px;margin-top:6px;font-size:13px}
+.muted{color:var(--muted)}
+select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+pre{margin:0;white-space:pre-wrap;word-break:break-all}
+</style>
+</head>
+<body>
+<main>
+  <h1>Orders data health</h1>
+  <div class="sub">Target table <span class="mono">fact_orders</span> · contract <span class="mono">orders.yaml</span> · refreshes every 30 s</div>
+  <div id="banner"></div>
+  <div class="pillars" id="pillars"></div>
+  <h2>Run history <span class="muted" style="font-weight:400">(click a run to diagnose it)</span></h2>
+  <div class="card scroll" id="runs"></div>
+  <div id="detail"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === 'class' ? el.className = v : el.setAttribute(k, v);
+  for (const k of kids.flat()) if (k != null) el.append(k.nodeType ? k : document.createTextNode(k));
+  return el;
+}
+const ICON = {pass:'✓',PASS:'✓',SUCCESS:'✓',warn:'!',degraded:'!',FAIL:'✕',fail:'✕',BLOCKED:'✕',ERROR:'✕',SKIPPED:'–',unknown:'–',RUNNING:'…'};
+const LABEL = {pass:'Pass',warn:'Warning',fail:'Failing',unknown:'No data'};
+const chip = (s, text) => h('span', {class: 'chip ' + s}, (ICON[s] || '') + ' ' + (text || LABEL[s] || s));
+const get = async u => { const r = await fetch(u); if (!r.ok) throw new Error((await r.json()).error || r.status); return r.json(); };
+const num = n => n == null ? '–' : Number(n).toLocaleString();
+let selected = null;
+
+function banner(hl) {
+  const r = hl.latest_run, ok = hl.last_successful_batch;
+  const titles = {healthy:'Healthy', degraded:'Healthy, with warnings', blocked:'Latest load blocked', error:'Pipeline error', running:'Running', unknown:'No runs yet'};
+  let msg = 'Run the pipeline to see data health.';
+  if (r) {
+    const fails = hl.failing_checks.filter(c => c.severity === 'blocking').length;
+    if (hl.status === 'healthy') msg = `Batch ${r.batch_date} passed every check and was loaded (${num(r.loaded_rows)} rows).`;
+    else if (hl.status === 'degraded') msg = `Batch ${r.batch_date} was loaded, but ${r.warnings} warning check(s) failed. Review them below.`;
+    else if (hl.status === 'blocked') msg = `Batch ${r.batch_date} was NOT loaded: ${fails} blocking check(s) failed. Bad data did not reach the warehouse. ` +
+      (ok ? `The table still holds good data up to batch ${ok.batch_date}.` : 'No batch has been loaded yet.');
+    else if (hl.status === 'error') msg = `Batch ${r.batch_date} crashed unexpectedly: ${r.error || 'see logs'}.`;
+  }
+  $('banner').replaceChildren(h('div', {class: 'card banner ' + hl.status}, h('div', {},
+    h('div', {class: 'big'}, ICON[hl.status === 'healthy' ? 'pass' : hl.status === 'degraded' ? 'warn' : hl.status === 'unknown' ? 'unknown' : 'fail'], ' ', titles[hl.status]),
+    h('div', {}, msg))));
+  $('pillars').replaceChildren(...Object.entries(hl.pillars).map(([p, s]) =>
+    h('div', {class: 'card pillar'}, h('div', {class: 'name'}, p), chip(s))));
+}
+
+function runsTable(runs) {
+  const rows = runs.map(r => {
+    const tr = h('tr', {class: 'run' + (r.run_id === selected ? ' sel' : '')},
+      h('td', {}, r.batch_date), h('td', {}, chip(r.status)), h('td', {}, num(r.source_rows)),
+      h('td', {}, num(r.loaded_rows)), h('td', {}, r.blocking_failures || '–'), h('td', {}, r.warnings || '–'),
+      h('td', {class: 'mono muted'}, r.run_id));
+    tr.onclick = () => { selected = r.run_id; runsTable(runs); detail(r.run_id); };
+    return tr;
+  });
+  $('runs').replaceChildren(h('table', {},
+    h('thead', {}, h('tr', {}, ['Batch', 'Result', 'Source rows', 'Loaded', 'Blocking fails', 'Warnings', 'Run ID'].map(t => h('th', {}, t)))),
+    h('tbody', {}, rows)));
+}
+
+async function detail(id) {
+  const {run, checks} = await get('/api/runs/' + id);
+  const failed = checks.filter(c => c.status === 'FAIL');
+  const rowsBox = h('div', {});
+  const sel = h('select', {}, h('option', {value: ''}, 'all failing checks'),
+    failed.filter(c => c.failed_rows).map(c => h('option', {value: c.check_name}, c.check_name)));
+  const loadRows = async () => {
+    const f = await get(`/api/runs/${id}/failures` + (sel.value ? '?check=' + encodeURIComponent(sel.value) : ''));
+    rowsBox.replaceChildren(f.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Check', 'CSV line', 'Row as delivered'].map(t => h('th', {}, t)))),
+      h('tbody', {}, f.map(x => h('tr', {}, h('td', {}, x.check_name), h('td', {class: 'mono'}, x.csv_line), h('td', {class: 'mono'}, h('pre', {}, x.row_json))))))
+      : h('div', {class: 'muted'}, 'No failing rows stored for this selection.'));
+  };
+  sel.onchange = loadRows;
+  const trs = checks.map(c => h('tr', {},
+    h('td', {}, chip(c.status), ' ', c.severity === 'warning' ? h('span', {class: 'muted'}, '(warning)') : ''),
+    h('td', {}, h('div', {}, c.check_name), h('div', {class: 'muted', style: 'font-size:12px;text-transform:capitalize'}, c.pillar),
+      c.status === 'FAIL' && c.hint ? h('div', {class: 'hint'}, h('b', {}, 'First step: '), c.hint) : null),
+    h('td', {}, c.expected), h('td', {}, c.actual, c.message ? h('div', {class: 'muted'}, c.message) : null),
+    h('td', {}, c.failed_rows || '–')));
+  $('detail').replaceChildren(
+    h('h2', {}, `Run ${run.run_id} · batch ${run.batch_date}`),
+    run.error ? h('div', {class: 'card'}, h('b', {}, 'Error: '), run.error) : null,
+    h('div', {class: 'card scroll'}, h('table', {},
+      h('thead', {}, h('tr', {}, ['Result', 'Check', 'Expected', 'Actual', 'Failed rows'].map(t => h('th', {}, t)))),
+      h('tbody', {}, trs))),
+    failed.some(c => c.failed_rows) ? h('div', {}, h('h2', {}, 'Failing rows (first 50) ', sel), h('div', {class: 'card scroll'}, rowsBox)) : null);
+  if (failed.some(c => c.failed_rows)) loadRows();
+}
+
+async function refresh() {
+  try {
+    const [hl, runs] = await Promise.all([get('/api/health'), get('/api/runs')]);
+    banner(hl); runsTable(runs);
+    if (!selected && runs.length) { selected = runs[0].run_id; runsTable(runs); }
+    if (selected) detail(selected);
+  } catch (e) {
+    $('banner').replaceChildren(h('div', {class: 'card banner error'}, 'Cannot load data: ' + e.message));
+  }
+}
+refresh(); setInterval(refresh, 30000);
+</script>
+</body>
+</html>

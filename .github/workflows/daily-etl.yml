@@ -1,0 +1,64 @@
+name: Daily ETL
+
+# Runs every day at 06:00 UTC for yesterday's batch (the pipeline's freshness SLA assumes a 06:00 UTC run).
+# Run it by hand from the Actions tab to rerun a date (idempotent) or to demo a failure with `inject`.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      batch_date:
+        description: "Batch date YYYY-MM-DD (default: yesterday, UTC)"
+        required: false
+      inject:
+        description: "Demo only: defects to inject, e.g. duplicates,stale"
+        required: false
+      rows:
+        description: "Rows to simulate"
+        required: false
+        default: "5000"
+
+concurrency:
+  group: daily-etl
+  cancel-in-progress: false
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # Inputs go through env (never interpolated into the script) to avoid shell injection.
+      IN_DATE: ${{ inputs.batch_date }}
+      IN_INJECT: ${{ inputs.inject }}
+      IN_ROWS: ${{ inputs.rows }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+
+      - name: Check configuration
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Repository secret DATABASE_URL is not set (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Resolve batch date
+        run: |
+          D="${IN_DATE:-$(date -u -d yesterday +%F)}"
+          if ! echo "$D" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "::error::batch_date must look like 2026-10-08"; exit 1
+          fi
+          echo "BATCH_DATE=$D" >> "$GITHUB_ENV"
+
+      - name: Deliver source batch (simulated source system)
+        run: python -m simulator.generate --date "$BATCH_DATE" --rows "${IN_ROWS:-5000}" --inject "$IN_INJECT"
+
+      - name: Run ETL (non-zero exit = batch blocked or crashed)
+        run: python -m etl.run --date "$BATCH_DATE"

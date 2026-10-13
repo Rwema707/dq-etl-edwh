@@ -1,0 +1,80 @@
+# Data contract for the `orders` dataset. This file IS the definition of "good data".
+# To reuse the pipeline for another dataset: copy this file, change columns and checks.
+dataset: orders
+description: Daily batch of customer orders from the (simulated) order system.
+owner: data-engineering
+source:
+  file_pattern: "orders_{batch_date}.csv"
+target:
+  table: fact_orders
+  key: order_id
+max_failed_rows_stored: 100   # per check, so the metadata DB stays small
+columns:
+  order_id: string
+  customer_id: string
+  email: string
+  amount: float
+  status: string
+  order_ts: timestamp          # ISO-8601, assumed UTC
+checks:
+  - name: schema_matches_contract
+    type: schema
+    pillar: correctness
+    severity: blocking
+    hint: "Upstream changed the file layout. Compare the file header with the columns in contracts/orders.yaml and ask the source owner. Do not edit the data."
+  - name: values_parseable
+    type: parseable
+    pillar: correctness
+    severity: blocking
+    hint: "Some values cannot be read as their contract type (e.g. '12,50' for amount). See failed rows; this is an upstream formatting problem."
+  - name: order_id_unique
+    type: unique
+    column: order_id
+    pillar: correctness
+    severity: blocking
+    hint: "Duplicate order_id values. Check whether the source re-sent records or the extract was run twice."
+  - name: amount_in_range
+    type: range
+    column: amount
+    min: 0.01
+    max: 10000
+    pillar: correctness
+    severity: blocking
+    hint: "Amounts outside the plausible range (<= 0 or > 10000). Confirm with the source owner whether refunds are being sent as negative orders."
+  - name: status_accepted
+    type: accepted_values
+    column: status
+    values: [PLACED, PAID, SHIPPED, DELIVERED, CANCELLED]
+    pillar: correctness
+    severity: blocking
+    hint: "Unknown status value. Either upstream introduced a new status (update the contract deliberately) or it is a typo/bug."
+  - name: email_format
+    type: regex
+    column: email
+    pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    pillar: correctness
+    severity: warning
+    hint: "Malformed emails. Not blocking: email is not used for joins, but the rate should stay near zero."
+  - name: required_fields_not_null
+    type: not_null
+    columns: [order_id, customer_id, amount, status, order_ts]
+    pillar: completeness
+    severity: blocking
+    hint: "Required fields are empty. Look at which column spiked in the failed rows; usually a broken upstream join or extract."
+  - name: row_count_in_band
+    type: row_count_band
+    tolerance: 0.30
+    window: 7
+    min_history: 3
+    pillar: completeness
+    severity: blocking
+    hint: "Batch size is far from the recent average. Check for a partial extract or an upstream outage (or a genuine promotion/holiday)."
+  - name: freshness_within_sla
+    type: freshness
+    column: order_ts
+    max_age_hours: 24
+    pillar: freshness
+    severity: blocking
+    hint: "Newest order is older than the SLA. The source may have stopped producing data or the file is a re-delivery of old data."
+# A 10th check, source_equals_loaded (completeness, blocking), is built into the pipeline:
+# after loading, rows in the target for the batch must equal rows in the source file.
