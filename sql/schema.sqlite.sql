@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS fact_orders (
   order_ts    TEXT NOT NULL,
   batch_date  TEXT NOT NULL,
   run_id      TEXT NOT NULL,
-  loaded_at   TEXT NOT NULL
+  loaded_at   TEXT NOT NULL,
+  dataset     TEXT NOT NULL DEFAULT 'orders'
 );
 CREATE INDEX IF NOT EXISTS ix_fact_orders_batch ON fact_orders(batch_date);
 
@@ -23,7 +24,8 @@ CREATE TABLE IF NOT EXISTS dq_runs (
   loaded_rows INTEGER,
   blocking_failures INTEGER DEFAULT 0,
   warnings INTEGER DEFAULT 0,
-  error TEXT
+  error TEXT,
+  dataset TEXT NOT NULL DEFAULT 'orders'
 );
 CREATE INDEX IF NOT EXISTS ix_dq_runs_started ON dq_runs(started_at);
 CREATE TABLE IF NOT EXISTS dq_check_results (

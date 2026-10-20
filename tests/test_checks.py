@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from dq.checks import CHECKS, Context
+from dq.checks import CHECKS, Context, InfrastructureError
 from dq.contract import load_contract
 from dq.engine import run_checks
 from etl.transform import transform
@@ -110,6 +110,30 @@ class CheckTests(unittest.TestCase):
         o = CHECKS["row_count_band"](spec, ctx(GOOD, history=[2, 2, 2]))   # consecutive days: only one is a Wednesday-match at most
         self.assertTrue(o.passed)
         self.assertIn("recent", o.expected)
+
+    def test_unique_in_target(self):
+        spec = {"column": "order_id"}
+        c = ctx(GOOD)
+        c.target_keys = lambda keys: set()
+        self.assertTrue(CHECKS["unique_in_target"](spec, c).passed)
+        c.target_keys = lambda keys: {"B"} & set(keys)                  # B was loaded by an earlier batch
+        o = CHECKS["unique_in_target"](spec, c)
+        self.assertFalse(o.passed)
+        self.assertEqual(o.failed_idx, [1])
+        self.assertIn("e.g. B", o.message)
+
+    def test_unique_in_target_without_database_access_is_skipped_not_passed(self):
+        self.assertIsNone(CHECKS["unique_in_target"]({"column": "order_id"}, ctx(GOOD)).passed)
+
+    def test_infrastructure_errors_are_not_swallowed_as_check_failures(self):
+        def broken(keys):
+            raise InfrastructureError("db down")
+        contract = {"checks": [{"name": "x", "type": "unique_in_target", "column": "order_id",
+                                "pillar": "correctness", "severity": "blocking"}]}
+        c = ctx(GOOD)
+        c.target_keys = broken
+        with self.assertRaises(InfrastructureError):
+            run_checks(contract, c)
 
     def test_freshness(self):
         spec = {"column": "order_ts", "max_age_hours": 24}

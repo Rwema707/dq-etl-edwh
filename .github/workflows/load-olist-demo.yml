@@ -1,8 +1,8 @@
 name: Load Olist demo data
 
 # Manual. Downloads the public Olist dataset, splits it into daily batches and replays a date range through the
-# pipeline into the database in the DATABASE_URL secret. Use a SEPARATE database/branch from the simulated daily
-# run (see docs/real-data.md), then point Vercel's DATABASE_URL at it to show real data on the dashboard.
+# pipeline into the database in the DATABASE_URL secret. It can share that database with the simulated daily run:
+# runs are tagged by dataset and the dashboard has a Dataset picker (see docs/real-data.md).
 on:
   workflow_dispatch:
     inputs:

@@ -1,6 +1,6 @@
 """Zero-dependency fallback API + dashboard host (SQLite or Postgres). The production API is api/app.py (FastAPI).  python -m api.server --port 8000
 
-Endpoints: /  /api/health  /api/runs  /api/runs/<id>  /api/runs/<id>/failures?check=<name>
+Endpoints: /  /api/datasets  /api/health[?dataset=]  /api/runs[?dataset=&limit=]  /api/runs/<id>  /api/runs/<id>/failures?check=<name>
 """
 from __future__ import annotations
 
@@ -56,17 +56,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._json({"error": "database unavailable - run the pipeline first"}, 503)
         try:
+            qs = parse_qs(url.query)
+            dataset = qs.get("dataset", [None])[0]
+            if parts[1:] == ["datasets"]:
+                return self._json(queries.list_datasets(conn))
             if parts[1:] == ["health"]:
-                return self._json(queries.get_health(conn))
+                return self._json(queries.get_health(conn, dataset))
             if parts[1:] == ["runs"]:
-                raw = parse_qs(url.query).get("limit", ["30"])[0]
+                raw = qs.get("limit", ["30"])[0]
                 limit = min(int(raw), 200) if raw.isdigit() else 30
-                return self._json(queries.list_runs(conn, limit))
+                return self._json(queries.list_runs(conn, limit, dataset))
             if len(parts) == 3 and parts[1] == "runs":
                 run = queries.get_run(conn, parts[2])
                 return self._json(run) if run else self._json({"error": "run not found"}, 404)
             if len(parts) == 4 and parts[1] == "runs" and parts[3] == "failures":
-                check = parse_qs(url.query).get("check", [None])[0]
+                check = qs.get("check", [None])[0]
                 return self._json(queries.get_failures(conn, parts[2], check))
             return self._json({"error": "not found"}, 404)
         finally:

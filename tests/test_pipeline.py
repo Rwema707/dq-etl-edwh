@@ -3,7 +3,7 @@ import unittest
 
 from etl.load import load
 from etl.transform import transform
-from simulator.generate import generate_batch
+from simulator.generate import generate_batch, write_batch
 from tests.helpers import D0, Env
 
 # defect -> check that must catch it
@@ -85,8 +85,26 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.env.run(5, defects=["duplicates"]).status, "BLOCKED")
         self.assertEqual(self.env.count(5), 300)
 
+    def test_an_order_resent_in_a_later_batch_is_blocked(self):
+        self.env.seed_history(2)
+        old_ids = self.env.db.query("SELECT order_id FROM fact_orders WHERE batch_date = ? LIMIT 3",
+                                    (self.env.day(0).isoformat(),))
+        df = generate_batch(self.env.day(2), 300)
+        df.loc[:2, "order_id"] = [r["order_id"] for r in old_ids]          # 3 orders from day 0, delivered again
+        write_batch(df, self.env.dir, self.env.day(2))
+        s = self.env.run(2, write=False)
+        self.assertEqual(s.status, "BLOCKED")
+        self.assertEqual(self.env.check_status(s.run_id, "order_id_not_loaded_before"), "FAIL")
+        self.assertEqual(self.env.count(2), 0)
+
+    def test_rerunning_the_same_batch_is_not_a_cross_batch_duplicate(self):
+        self.env.run(0)
+        s = self.env.run(0)                                                 # same ids, same batch
+        self.assertEqual(s.status, "SUCCESS")
+        self.assertEqual(self.env.check_status(s.run_id, "order_id_not_loaded_before"), "PASS")
+
     def test_unexpected_crash_is_recorded_as_error(self):
-        self.env.db.execute("DROP TABLE fact_orders")  # simulate infrastructure failure
+        self.env.db.execute("DROP TABLE fact_orders")  # simulate infrastructure failure (found by the lookup check)
         s = self.env.run(0)
         self.assertEqual(s.status, "ERROR")
         err = self.env.db.one("SELECT error FROM dq_runs WHERE run_id=?", (s.run_id,))["error"]

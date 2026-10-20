@@ -36,6 +36,7 @@ For a separately hosted frontend, set `VITE_API_BASE=https://your-api-host` befo
 ## Real data
 Besides the simulator, the pipeline replays the public **Olist** e-commerce dataset (about 99k real orders)
 as daily batches, with real weekday patterns and real defects: see [`docs/real-data.md`](docs/real-data.md).
+Several datasets can share one database; the dashboard has a **Dataset** picker.
 
 ## Database and deployment
 Set `DATABASE_URL=postgresql://...` to use PostgreSQL; otherwise a local SQLite file is used. The same

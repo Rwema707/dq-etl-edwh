@@ -1,9 +1,10 @@
 """The database adapter: placeholder rewriting, backend selection and transaction behaviour."""
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
-from etl.db import Database, Rollback, connect, is_postgres
+from etl.db import Database, Rollback, connect, init_db, is_postgres
 
 
 class FakeConn:
@@ -82,6 +83,52 @@ class TransactionTests(unittest.TestCase):
     def test_query_returns_plain_dicts(self):
         self.db.execute("INSERT INTO t VALUES (?)", (7,))
         self.assertEqual(self.db.query("SELECT a FROM t"), [{"a": 7}])
+
+
+OLD_SCHEMA = """
+CREATE TABLE dq_runs (run_id TEXT PRIMARY KEY, batch_date TEXT NOT NULL, started_at TEXT NOT NULL,
+  finished_at TEXT, status TEXT NOT NULL, source_rows INTEGER, loaded_rows INTEGER,
+  blocking_failures INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, error TEXT);
+CREATE TABLE fact_orders (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, email TEXT, amount REAL NOT NULL,
+  status TEXT NOT NULL, order_ts TEXT NOT NULL, batch_date TEXT NOT NULL, run_id TEXT NOT NULL, loaded_at TEXT NOT NULL);
+INSERT INTO dq_runs (run_id, batch_date, started_at, status) VALUES ('old1', '2026-10-01', '2026-10-02T06:00:00', 'SUCCESS');
+INSERT INTO fact_orders VALUES ('o1', 'c1', NULL, 5.0, 'PAID', '2026-10-01T10:00:00', '2026-10-01', 'old1', '2026-10-02T06:00:00');
+"""
+
+
+class MigrationTests(unittest.TestCase):
+    def test_database_created_before_the_dataset_column_is_upgraded_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = connect(str(Path(tmp) / "old.db"))
+            db.conn.executescript(OLD_SCHEMA)
+            init_db(db)                                   # must not fail, must keep the data
+            self.assertEqual(db.one("SELECT dataset FROM dq_runs WHERE run_id='old1'")["dataset"], "orders")
+            self.assertEqual(db.one("SELECT dataset FROM fact_orders WHERE order_id='o1'")["dataset"], "orders")
+            init_db(db)                                   # and be safe to run again
+            db.close()
+
+
+class DatasetIsolationTests(unittest.TestCase):
+    def test_reloading_one_dataset_never_deletes_another_datasets_rows(self):
+        from etl.load import load
+        from etl.transform import transform
+        from simulator.generate import generate_batch
+        from tests.helpers import Env
+        env = Env()
+        try:
+            cols = env.contract["columns"]
+            a = transform(generate_batch(date(2026, 10, 1), 20), cols)
+            b = transform(generate_batch(date(2026, 10, 1), 20), cols)
+            b["order_id"] = "B-" + b["order_id"]          # distinct ids, SAME batch date
+            load(env.db, a, "ra", date(2026, 10, 1), dataset="alpha")
+            load(env.db, b, "rb", date(2026, 10, 1), dataset="beta")
+            load(env.db, b, "rb2", date(2026, 10, 1), dataset="beta")        # rerun beta
+            def n(d):
+                return env.db.one("SELECT COUNT(*) AS n FROM fact_orders WHERE dataset = ?", (d,))["n"]
+
+            self.assertEqual((n("alpha"), n("beta")), (20, 20))
+        finally:
+            env.close()
 
 
 if __name__ == "__main__":
