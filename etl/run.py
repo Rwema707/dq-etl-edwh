@@ -41,16 +41,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
-def _history(db: Database, batch_date: date, window: int) -> list[int]:
-    """Row counts of the latest successful run per earlier batch date, most recent first."""
+def _history_depth(contract: dict) -> int:
+    """How many earlier batches the checks may look at (weekday mode needs ~7 days per sample)."""
+    return max((c.get("window", 7) * (7 if c.get("seasonality") == "weekday" else 1)
+                for c in contract["checks"] if c["type"] == "row_count_band"), default=7)
+
+
+def _history(db: Database, batch_date: date, depth: int) -> list[tuple[date, int]]:
+    """(batch_date, rows) of the latest successful run per earlier batch date, newest first."""
     rows = db.query("SELECT batch_date, source_rows FROM dq_runs WHERE status='SUCCESS' AND batch_date < ?"
                     " ORDER BY batch_date DESC, started_at DESC", (batch_date.isoformat(),))
     seen, out = set(), []
     for r in rows:
         if r["batch_date"] not in seen:
             seen.add(r["batch_date"])
-            out.append(r["source_rows"])
-    return out[:window]
+            out.append((date.fromisoformat(r["batch_date"]), r["source_rows"]))
+    return out[:depth]
 
 
 def _persist(db: Database, run_id: str, results: list[CheckResult], raw, max_rows: int, start_pos: int = 0) -> None:
@@ -97,8 +103,8 @@ def run_pipeline(db: Database, contract: dict, batch_date: date, data_dir: str, 
             return s
 
         typed = transform(raw, contract["columns"])
-        ctx = Context(raw, typed, contract["columns"],
-                      _history(db, batch_date, max(c.get("window", 7) for c in contract["checks"])), as_of)
+        ctx = Context(raw, typed, contract["columns"], _history(db, batch_date, _history_depth(contract)),
+                      as_of, batch_date)
         results = run_checks(contract, ctx)
         _persist(db, run_id, results, raw, max_rows)
         for r in results:

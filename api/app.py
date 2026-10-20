@@ -1,6 +1,6 @@
 """Production API (FastAPI).   uvicorn api.app:app --port 8000
 
-Read-only. Interactive docs at /docs. Serves the built dashboard (dashboard/dist) when present, so
+Read-only. Interactive docs at /api/docs. Serves the built dashboard (dashboard/dist) when present, so
 one process can host both locally; in production the dashboard is usually hosted separately and
 this service only needs CORS_ORIGINS set to the dashboard's URL.
 """
@@ -20,7 +20,9 @@ from etl.db import Database, connect
 DASH = Path(__file__).resolve().parent.parent / "dashboard"
 DIST, LEGACY = DASH / "dist", DASH / "legacy.html"
 
-app = FastAPI(title="Data health API", version="1.0.0",
+# Everything lives under /api so one top-level rewrite (vercel.json) exposes the whole service.
+app = FastAPI(title="Data health API", version="1.0.0", docs_url="/api/docs", redoc_url=None,
+              openapi_url="/api/openapi.json",
               description="Read-only view of ETL runs, data quality check results and failing rows.")
 
 origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -39,7 +41,7 @@ def get_db():
         db.close()
 
 
-@app.get("/healthz", include_in_schema=False)
+@app.get("/api/healthz", include_in_schema=False)
 def healthz() -> dict:
     """Liveness probe for the host (does not touch the database)."""
     return {"ok": True}

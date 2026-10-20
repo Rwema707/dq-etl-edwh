@@ -18,7 +18,7 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 
 python -m simulator.seed_demo          # builds ~11 demo runs, including failures (SQLite by default)
-uvicorn api.app:app --port 8000        # FastAPI on :8000, docs at /docs (serves dashboard/dist if built)
+uvicorn api.app:app --port 8000        # FastAPI on :8000, docs at /api/docs (serves dashboard/dist if built)
 python -m unittest discover -s tests -t .   # or: pytest -q
 ```
 
@@ -33,10 +33,14 @@ Without a build, the API serves `dashboard/legacy.html` (zero-build version).
 `python -m api.server` is a dependency-free fallback API if FastAPI is not installed.
 For a separately hosted frontend, set `VITE_API_BASE=https://your-api-host` before `npm run build`.
 
+## Real data
+Besides the simulator, the pipeline replays the public **Olist** e-commerce dataset (about 99k real orders)
+as daily batches, with real weekday patterns and real defects: see [`docs/real-data.md`](docs/real-data.md).
+
 ## Database and deployment
 Set `DATABASE_URL=postgresql://...` to use PostgreSQL; otherwise a local SQLite file is used. The same
-code and tests run on both. A daily GitHub Actions workflow runs the ETL; the API deploys to Render and the
-dashboard to Vercel. Step-by-step: [`docs/deployment.md`](docs/deployment.md).
+code and tests run on both. A daily GitHub Actions workflow runs the ETL; the API and the
+dashboard deploy together to Vercel as one project (`vercel.json`). Step-by-step: [`docs/deployment.md`](docs/deployment.md).
 
 ## Run it yourself
 ```bash

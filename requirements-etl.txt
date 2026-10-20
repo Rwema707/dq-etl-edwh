@@ -1,0 +1,5 @@
+# Everything needed to run the ETL, the tests and a local API server.
+-r requirements.txt
+pandas>=2.2
+PyYAML>=6.0
+uvicorn>=0.30

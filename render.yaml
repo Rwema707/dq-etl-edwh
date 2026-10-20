@@ -1,12 +1,12 @@
-# Render Blueprint: New > Blueprint > pick this repo. Then fill in the two secret values in the dashboard.
+# OPTIONAL alternative to Vercel for hosting the API (see docs/deployment.md). Render Blueprint: New > Blueprint > pick this repo. Then fill in the two secret values in the dashboard.
 services:
   - type: web
     name: dq-api
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-etl.txt
     startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /healthz
+    healthCheckPath: /api/healthz
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"

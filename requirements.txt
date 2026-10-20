@@ -1,5 +1,4 @@
-pandas>=2.2
-PyYAML>=6.0
-psycopg[binary]>=3.2
+# Runtime dependencies of the API service. Vercel installs this file for the dq-api service,
+# so it deliberately excludes pandas/PyYAML (only the ETL needs them) to keep the bundle small.
 fastapi>=0.115
-uvicorn[standard]>=0.30
+psycopg[binary]>=3.2
