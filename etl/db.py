@@ -113,7 +113,7 @@ def is_postgres(target: str) -> bool:
 def connect(target: str | None = None, readonly: bool = False) -> Database:
     target = target or os.environ.get("DATABASE_URL") or os.environ.get("DQ_DB_PATH", "data/edwh.db")
     if is_postgres(target):
-        import psycopg                       # imported lazily so SQLite-only use needs no driver
+        import psycopg  # imported lazily so SQLite-only use needs no driver
         from psycopg.rows import dict_row
         # prepare_threshold=None: poolers such as Neon's PgBouncer do not support prepared statements.
         conn = psycopg.connect(target, autocommit=True, row_factory=dict_row, prepare_threshold=None)
