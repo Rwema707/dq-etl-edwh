@@ -91,7 +91,8 @@ class CheckTests(unittest.TestCase):
 
     def test_row_count_weekday_mode_compares_like_with_like(self):
         spec = {"tolerance": 0.3, "window": 4, "min_history": 3, "seasonality": "weekday"}
-        wed = lambda w: (BATCH - timedelta(weeks=w), 100)          # earlier Wednesdays: 100 rows
+        def wed(w):  # an earlier Wednesday: 100 rows
+            return (BATCH - timedelta(weeks=w), 100)
         other = [(BATCH - timedelta(days=d), 20) for d in (1, 2, 3, 4)]  # other days are quiet: 20 rows
         history = sorted(other + [wed(1), wed(2), wed(3)], key=lambda x: x[0], reverse=True)
         rows = [GOOD[0]] * 100
