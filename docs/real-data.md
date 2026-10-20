@@ -30,7 +30,7 @@ python -m sources.fetch_olist                    # downloads 3 files to data/raw
 python -m sources.olist --start 2018-03-01 --end 2018-04-15      # writes data/incoming/orders_<date>.csv
 python -m etl.backfill --contract contracts/olist_orders.yaml --db data/olist.db \
        --start 2018-03-01 --end 2018-04-15      # replays oldest to newest; prints blocked days
-DQ_DB_PATH=data/olist.db uvicorn api.app:app --port 8000     # dashboard on the real data
+DQ_DB_PATH=data/olist.db uvicorn api.app:app --port 8000     # dashboard on the real data (or point it at any shared database)
 ```
 `fetch_olist` uses a community Hugging Face mirror by default (third-party, may move). Alternatives:
 `--kaggle` (needs `pip install kagglehub`, possibly Kaggle credentials) or `--base-url` for your own copy. Wrong
@@ -39,9 +39,10 @@ or truncated downloads are rejected by row count (99,441 orders, 99,441 customer
 ## Run it in GitHub Actions into your cloud database
 **Actions -> Load Olist demo data -> Run workflow** (choose a start/end date). It uses the `DATABASE_URL` secret.
 
-> **Use a separate database for each dataset.** History (and therefore the volume baseline) is not partitioned by
-> dataset, and the dashboard shows one database. Create a second Neon database or branch for Olist, and point
-> Vercel's `DATABASE_URL` at whichever one you want to show.
+> **Datasets can share one database.** Runs and loaded rows carry a `dataset` column, the volume baseline only
+> looks at the same dataset's history, and reloading one dataset never touches another's rows. The dashboard has a
+> **Dataset** picker (shown when more than one exists; `?dataset=olist_orders` in the URL opens one directly).
+> Without a choice, it shows the dataset that ran most recently.
 
 ## Good date ranges
 | Range | What you get |

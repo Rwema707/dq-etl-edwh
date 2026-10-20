@@ -5,6 +5,7 @@
 | 1 | schema_matches_contract | Correctness | Blocking | Columns exactly match contract | Upstream layout change |
 | 2 | values_parseable | Correctness | Blocking | amount is numeric, order_ts is ISO-8601 | Bad formats (`12,50`) |
 | 3 | order_id_unique | Correctness | Blocking | No duplicated order_id | Re-sent records |
+| 3b | order_id_not_loaded_before | Correctness | Blocking | No order_id already loaded by an **earlier batch** of the same dataset (rerunning the same batch is fine) | Old records re-sent in a later delivery |
 | 4 | amount_in_range | Correctness | Blocking | 0.01 ≤ amount ≤ 10,000 | Negative/zero/absurd amounts |
 | 5 | status_accepted | Correctness | Blocking | status in 5 known values | Typos, unannounced new statuses |
 | 6 | email_format | Correctness | **Warning** | Matches a basic email pattern | Malformed emails (not used for joins) |
@@ -16,4 +17,4 @@
 
 Each rule has at least one failing-case test (`tests/test_checks.py`, `tests/test_pipeline.py`).
 
-The Olist (real data) contract, `contracts/olist_orders.yaml`, applies the same pillars with 8 checks and no email rule.
+The Olist (real data) contract, `contracts/olist_orders.yaml`, applies the same pillars with 9 checks and no email rule.

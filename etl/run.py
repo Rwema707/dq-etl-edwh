@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from dq.checks import Context
+from dq.checks import Context, InfrastructureError
 from dq.contract import load_contract
 from dq.engine import CheckResult, run_checks
 from etl.alert import send_alert
@@ -47,16 +47,38 @@ def _history_depth(contract: dict) -> int:
                 for c in contract["checks"] if c["type"] == "row_count_band"), default=7)
 
 
-def _history(db: Database, batch_date: date, depth: int) -> list[tuple[date, int]]:
-    """(batch_date, rows) of the latest successful run per earlier batch date, newest first."""
-    rows = db.query("SELECT batch_date, source_rows FROM dq_runs WHERE status='SUCCESS' AND batch_date < ?"
-                    " ORDER BY batch_date DESC, started_at DESC", (batch_date.isoformat(),))
+def _history(db: Database, batch_date: date, depth: int, dataset: str) -> list[tuple[date, int]]:
+    """(batch_date, rows) of the latest successful run per earlier batch date of this dataset, newest first."""
+    rows = db.query("SELECT batch_date, source_rows FROM dq_runs WHERE status='SUCCESS' AND dataset = ?"
+                    " AND batch_date < ? ORDER BY batch_date DESC, started_at DESC",
+                    (dataset, batch_date.isoformat()))
     seen, out = set(), []
     for r in rows:
         if r["batch_date"] not in seen:
             seen.add(r["batch_date"])
             out.append((date.fromisoformat(r["batch_date"]), r["source_rows"]))
     return out[:depth]
+
+
+def _target_key_lookup(db: Database, contract: dict, batch_date: date):
+    """Keys already in the target from other batches of this dataset (chunked to respect parameter limits)."""
+    table, key, dataset = contract["target"]["table"], contract["target"]["key"], contract["dataset"]
+
+    def lookup(values: list[str]) -> set[str]:
+        found: set[str] = set()
+        vals = sorted(set(values))
+        try:
+            for i in range(0, len(vals), 1000):
+                chunk = vals[i:i + 1000]
+                marks = ",".join("?" * len(chunk))
+                rows = db.query(f"SELECT {key} AS k FROM {table} WHERE dataset = ? AND batch_date <> ? "
+                                f"AND {key} IN ({marks})", (dataset, batch_date.isoformat(), *chunk))
+                found.update(r["k"] for r in rows)
+        except Exception as exc:
+            raise InfrastructureError(f"cannot look up earlier batches in {table}: {exc}") from exc
+        return found
+
+    return lookup
 
 
 def _persist(db: Database, run_id: str, results: list[CheckResult], raw, max_rows: int, start_pos: int = 0) -> None:
@@ -86,8 +108,8 @@ def _finish(db: Database, run_id: str, status: str, results: list[CheckResult], 
 def run_pipeline(db: Database, contract: dict, batch_date: date, data_dir: str, as_of: datetime | None = None) -> RunSummary:
     run_id = uuid.uuid4().hex[:12]
     as_of = as_of or datetime.combine(batch_date + timedelta(days=1), time(6, 0))  # simulated 06:00 UTC run
-    db.execute("INSERT INTO dq_runs (run_id, batch_date, started_at, status) VALUES (?,?,?, 'RUNNING')",
-                 (run_id, batch_date.isoformat(), _now()))
+    db.execute("INSERT INTO dq_runs (run_id, batch_date, started_at, status, dataset) VALUES (?,?,?, 'RUNNING', ?)",
+               (run_id, batch_date.isoformat(), _now(), contract["dataset"]))
     log("INFO", "run_started", run_id=run_id, batch_date=batch_date)
     max_rows = contract.get("max_failed_rows_stored", 100)
     try:
@@ -103,8 +125,9 @@ def run_pipeline(db: Database, contract: dict, batch_date: date, data_dir: str, 
             return s
 
         typed = transform(raw, contract["columns"])
-        ctx = Context(raw, typed, contract["columns"], _history(db, batch_date, _history_depth(contract)),
-                      as_of, batch_date)
+        ctx = Context(raw, typed, contract["columns"],
+                      _history(db, batch_date, _history_depth(contract), contract["dataset"]), as_of, batch_date,
+                      _target_key_lookup(db, contract, batch_date))
         results = run_checks(contract, ctx)
         _persist(db, run_id, results, raw, max_rows)
         for r in results:
@@ -119,7 +142,7 @@ def run_pipeline(db: Database, contract: dict, batch_date: date, data_dir: str, 
                        + ", ".join(r.name for r in failing) + f" (run {run_id}). Nothing was loaded.")
             return s
 
-        loaded, ok = load(db, typed, run_id, batch_date, expected_rows=len(raw))
+        loaded, ok = load(db, typed, run_id, batch_date, expected_rows=len(raw), dataset=contract["dataset"])
         rec = CheckResult("source_equals_loaded", "reconciliation", "completeness", "blocking",
                           "PASS" if ok else "FAIL", f"{len(raw)} rows in target", f"{loaded} rows in target",
                           0, "" if ok else "row count mismatch after load; transaction rolled back",

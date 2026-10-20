@@ -17,6 +17,18 @@ from pathlib import Path
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 TABLES = ("dq_failed_rows", "dq_check_results", "dq_runs", "fact_orders")
 
+# Columns added after the first release. Fresh databases get them from the schema files; existing
+# databases get them here (idempotent), so `init_db` is always safe to run.
+MIGRATIONS = [
+    ("dq_runs", "dataset", "TEXT NOT NULL DEFAULT 'orders'"),
+    ("fact_orders", "dataset", "TEXT NOT NULL DEFAULT 'orders'"),
+]
+# Indexes on migrated columns must be created after the migration, never in the schema script.
+POST_MIGRATION_SQL = [
+    "CREATE INDEX IF NOT EXISTS ix_dq_runs_dataset ON dq_runs(dataset, started_at)",
+    "CREATE INDEX IF NOT EXISTS ix_fact_orders_dataset_batch ON fact_orders(dataset, batch_date)",
+]
+
 
 class Rollback(Exception):
     """Raise inside `with db.transaction()` to roll back without signalling a crash."""
@@ -74,6 +86,16 @@ class Database:
             self.conn.execute(text)          # no params -> multi-statement script is allowed
         else:
             self.conn.executescript(text)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        for table, column, ddl in MIGRATIONS:
+            if self.dialect == "postgres":
+                self.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
+            elif column not in [r["name"] for r in self.query(f"PRAGMA table_info({table})")]:
+                self.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        for sql in POST_MIGRATION_SQL:
+            self.execute(sql)
 
     def drop_all(self) -> None:
         """Used by tests only."""
@@ -91,7 +113,7 @@ def is_postgres(target: str) -> bool:
 def connect(target: str | None = None, readonly: bool = False) -> Database:
     target = target or os.environ.get("DATABASE_URL") or os.environ.get("DQ_DB_PATH", "data/edwh.db")
     if is_postgres(target):
-        import psycopg  # imported lazily so SQLite-only use needs no driver
+        import psycopg                       # imported lazily so SQLite-only use needs no driver
         from psycopg.rows import dict_row
         # prepare_threshold=None: poolers such as Neon's PgBouncer do not support prepared statements.
         conn = psycopg.connect(target, autocommit=True, row_factory=dict_row, prepare_threshold=None)

@@ -32,6 +32,12 @@ checks:
     pillar: correctness
     severity: blocking
     hint: "The same order appears twice in one batch. Check the extract for a duplicated join."
+  - name: order_id_not_loaded_before
+    type: unique_in_target
+    column: order_id
+    pillar: correctness
+    severity: blocking
+    hint: "These orders were already loaded by an earlier batch, so the source re-sent old records. Confirm with the source owner whether they are corrections (needs a deliberate update process) or a mistaken re-delivery."
   - name: amount_in_range
     type: range
     column: amount

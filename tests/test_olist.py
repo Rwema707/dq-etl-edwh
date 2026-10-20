@@ -121,6 +121,14 @@ class WatchdogTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("limit is 26h", msg)
 
+    def test_watchdog_can_be_scoped_to_a_dataset(self):
+        self.env.run(0)                                               # a run of dataset "orders" only
+        now = datetime.now(timezone.utc)
+        self.assertTrue(check_recent_run(self.env.db, now, 26, "orders")[0])
+        ok, msg = check_recent_run(self.env.db, now, 26, "olist_orders")
+        self.assertFalse(ok)
+        self.assertIn("olist_orders", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

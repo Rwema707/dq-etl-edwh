@@ -50,6 +50,12 @@ class FastApiTests(unittest.TestCase):
         self.assertGreater(len(fails), 0)
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
 
+    def test_datasets_endpoint_and_dataset_filter(self):
+        ds = self.client.get("/api/datasets").json()
+        self.assertEqual([d["dataset"] for d in ds], ["orders"])
+        self.assertEqual(self.client.get("/api/health", params={"dataset": "orders"}).json()["dataset"], "orders")
+        self.assertEqual(self.client.get("/api/runs", params={"dataset": "nope"}).json(), [])
+
     def test_docs_live_under_api_prefix(self):
         self.assertEqual(self.client.get("/api/docs").status_code, 200)
         self.assertIn("/api/health", self.client.get("/api/openapi.json").json()["paths"])

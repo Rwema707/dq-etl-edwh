@@ -7,10 +7,16 @@ Rules of this module:
 from __future__ import annotations
 
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 import pandas as pd
+
+
+class InfrastructureError(Exception):
+    """The environment failed (e.g. the database is unreachable). Never a data-quality verdict:
+    the engine re-raises it so the run is recorded as ERROR instead of a misleading check failure."""
 
 
 @dataclass
@@ -21,6 +27,8 @@ class Context:
     history: list[tuple[date, int]]   # (batch_date, source rows) of earlier successful batches, newest first
     as_of: datetime                   # reference "now" for freshness
     batch_date: date | None = None    # the batch being checked (needed for weekday-aware baselines)
+    # Given key values, returns those already loaded into the target by OTHER batches (None = no DB access)
+    target_keys: Callable[[list[str]], set[str]] | None = None
 
 
 @dataclass
@@ -90,6 +98,22 @@ def unique(spec, ctx: Context) -> Outcome:
     s = ctx.raw[spec["column"]]
     mask = s.duplicated(keep=False) & s.notna()
     return _rows_outcome(mask, f"{spec['column']} unique", f"share a duplicated {spec['column']}")
+
+
+@check("unique_in_target")
+def unique_in_target(spec, ctx: Context) -> Outcome:
+    """No key in this batch may already exist in the warehouse from a different batch.
+    (Re-running the same batch is fine: its own earlier rows are excluded by the lookup.)"""
+    col = spec["column"]
+    if ctx.target_keys is None:
+        return Outcome(None, f"{col} not loaded before", "not checked",
+                       message="skipped: no database access to look up earlier batches")
+    existing = ctx.target_keys(ctx.raw[col].dropna().tolist())
+    mask = ctx.raw[col].isin(existing)
+    out = _rows_outcome(mask, f"no {col} already loaded by an earlier batch", "were already loaded by an earlier batch")
+    if not out.passed:
+        out.message += f" (e.g. {', '.join(map(str, ctx.raw.loc[mask, col].head(3)))})"
+    return out
 
 
 @check("not_null")

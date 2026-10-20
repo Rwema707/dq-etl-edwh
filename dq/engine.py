@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from dq.checks import CHECKS, Context
+from dq.checks import CHECKS, Context, InfrastructureError
 
 
 @dataclass
@@ -35,6 +35,8 @@ def run_checks(contract: dict, ctx: Context) -> list[CheckResult]:
             continue
         try:
             o = CHECKS[spec["type"]](spec, ctx)
+        except InfrastructureError:
+            raise                  # the environment is broken: this is an ERROR run, not a data verdict
         except Exception as exc:  # a crashing check must be loud, never a silent pass
             results.append(CheckResult(**base, status="FAIL", message=f"check crashed: {type(exc).__name__}: {exc}"))
             continue

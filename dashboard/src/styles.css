@@ -131,3 +131,8 @@ td.empty { color: var(--bad); font-style: italic; }
 
 /* Let wide tables scroll inside their own box instead of widening the page */
 .checks, .checks > section, .check, .check-body, .rows { min-width: 0; }
+
+/* Dataset picker */
+.picker { display: flex; align-items: center; gap: 8px; }
+.picker select { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 5px 10px; font: inherit; }

@@ -47,16 +47,24 @@ def healthz() -> dict:
     return {"ok": True}
 
 
+@app.get("/api/datasets")
+def datasets(db: Database = Depends(get_db)) -> list[dict]:
+    """Datasets that have run, most recently active first, with their current status."""
+    return queries.list_datasets(db)
+
+
 @app.get("/api/health")
-def health(db: Database = Depends(get_db)) -> dict:
-    """Overall status, per-pillar status and the checks failing in the latest run."""
-    return queries.get_health(db)
+def health(dataset: str | None = None, db: Database = Depends(get_db)) -> dict:
+    """Overall status, per-pillar status and the checks failing in the latest run.
+    Without `dataset`, the dataset of the most recent run is used."""
+    return queries.get_health(db, dataset)
 
 
 @app.get("/api/runs")
-def runs(limit: int = Query(30, ge=1, le=200), db: Database = Depends(get_db)) -> list[dict]:
-    """Most recent runs first."""
-    return queries.list_runs(db, limit)
+def runs(limit: int = Query(30, ge=1, le=200), dataset: str | None = None,
+         db: Database = Depends(get_db)) -> list[dict]:
+    """Most recent runs first (for one dataset)."""
+    return queries.list_runs(db, limit, dataset)
 
 
 @app.get("/api/runs/{run_id}")
