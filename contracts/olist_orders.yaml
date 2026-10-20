@@ -1,0 +1,71 @@
+# Data contract for REAL data: the public Olist Brazilian e-commerce dataset (about 99k orders, 2016-2018),
+# reshaped into daily batches by sources/olist.py. Use a separate database for it (see docs/real-data.md).
+dataset: olist_orders
+description: Olist marketplace orders replayed as daily batches (batch date = purchase date).
+owner: data-engineering
+source:
+  file_pattern: "orders_{batch_date}.csv"
+target:
+  table: fact_orders
+  key: order_id
+max_failed_rows_stored: 100
+columns:
+  order_id: string
+  customer_id: string          # Olist's customer_unique_id (the real person), not the per-order customer_id
+  amount: float                # sum of payment_value across the order's payments (BRL)
+  status: string
+  order_ts: timestamp          # order_purchase_timestamp; the source is Brazilian local time, treated as UTC here
+checks:
+  - name: schema_matches_contract
+    type: schema
+    pillar: correctness
+    severity: blocking
+    hint: "The batch file layout changed. Compare its header with the columns in contracts/olist_orders.yaml."
+  - name: values_parseable
+    type: parseable
+    pillar: correctness
+    severity: blocking
+    hint: "Some amounts or timestamps cannot be read. See the failing rows; fix at the source."
+  - name: order_id_unique
+    type: unique
+    column: order_id
+    pillar: correctness
+    severity: blocking
+    hint: "The same order appears twice in one batch. Check the extract for a duplicated join."
+  - name: amount_in_range
+    type: range
+    column: amount
+    min: 0
+    max: 20000
+    pillar: correctness
+    severity: blocking
+    hint: "Order total outside 0 to 20,000 BRL. Check payments for that order before trusting the batch."
+  - name: status_accepted
+    type: accepted_values
+    column: status
+    values: [delivered, shipped, canceled, invoiced, processing, unavailable, approved, created]
+    pillar: correctness
+    severity: blocking
+    hint: "Unknown order status. Either Olist introduced a new state (update the contract deliberately) or it is a bug."
+  - name: required_fields_not_null
+    type: not_null
+    columns: [order_id, customer_id, amount, status, order_ts]
+    pillar: completeness
+    severity: blocking
+    hint: "Required fields are empty. A missing amount means the order has no payment record; a missing customer_id means the customer lookup failed. Both are source problems."
+  - name: row_count_in_band
+    type: row_count_band
+    tolerance: 0.35
+    window: 4
+    min_history: 3
+    seasonality: weekday
+    pillar: completeness
+    severity: blocking
+    hint: "Batch size is far from the usual for this weekday. Genuine spikes (Black Friday) look like this too: confirm with the business before overriding."
+  - name: freshness_within_sla
+    type: freshness
+    column: order_ts
+    max_age_hours: 30
+    pillar: freshness
+    severity: blocking
+    hint: "Newest order is older than the SLA. The day may be genuinely quiet, or the feed stopped early."

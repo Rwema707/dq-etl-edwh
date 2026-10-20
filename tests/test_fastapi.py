@@ -30,7 +30,7 @@ class FastApiTests(unittest.TestCase):
         self.env.close()
 
     def test_healthz_needs_no_database(self):
-        self.assertEqual(self.client.get("/healthz").json(), {"ok": True})
+        self.assertEqual(self.client.get("/api/healthz").json(), {"ok": True})
 
     def test_health_reports_blocked(self):
         body = self.client.get("/api/health").json()
@@ -49,6 +49,10 @@ class FastApiTests(unittest.TestCase):
         fails = self.client.get(f"/api/runs/{rid}/failures", params={"check": "order_id_unique"}).json()
         self.assertGreater(len(fails), 0)
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
+
+    def test_docs_live_under_api_prefix(self):
+        self.assertEqual(self.client.get("/api/docs").status_code, 200)
+        self.assertIn("/api/health", self.client.get("/api/openapi.json").json()["paths"])
 
     def test_missing_database_is_a_503_not_a_crash(self):
         if self.env.url:

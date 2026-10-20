@@ -64,8 +64,9 @@ checks:
   - name: row_count_in_band
     type: row_count_band
     tolerance: 0.30
-    window: 7
+    window: 4                  # same-weekday batches to compare with (falls back to the last 4 days of any kind)
     min_history: 3
+    seasonality: weekday
     pillar: completeness
     severity: blocking
     hint: "Batch size is far from the recent average. Check for a partial extract or an upstream outage (or a genuine promotion/holiday)."

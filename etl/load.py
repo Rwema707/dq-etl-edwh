@@ -17,10 +17,11 @@ def load(db: Database, typed: pd.DataFrame, run_id: str, batch_date: date,
     """
     expected = len(typed) if expected_rows is None else expected_rows
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    df = typed[["order_id", "customer_id", "email", "amount", "status", "order_ts"]].copy()
+    cols = ["order_id", "customer_id", "email", "amount", "status", "order_ts"]   # target table shape
+    df = pd.DataFrame({c: typed[c] if c in typed.columns else None for c in cols}, index=typed.index)
     df["order_ts"] = df["order_ts"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     df = df.astype(object).where(df.notna(), None)
-    rows = [(o, c, e, float(a), s, ts, batch_date.isoformat(), run_id, now)
+    rows = [(o, c, e, None if a is None else float(a), s, ts, batch_date.isoformat(), run_id, now)
             for o, c, e, a, s, ts in df.itertuples(index=False, name=None)]
 
     loaded = 0

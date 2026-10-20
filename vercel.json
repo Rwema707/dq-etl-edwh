@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "dq-api": {
+      "root": ".",
+      "framework": "fastapi",
+      "entrypoint": "api.app:app"
+    },
+    "dashboard": {
+      "root": "dashboard",
+      "framework": "vite"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": { "service": "dq-api" }
+    },
+    {
+      "source": "/(.*)",
+      "destination": { "service": "dashboard" }
+    }
+  ]
+}

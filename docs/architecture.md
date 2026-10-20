@@ -13,7 +13,7 @@ flowchart LR
   Q --> M[(dq_runs<br/>dq_check_results<br/>dq_failed_rows)]
   B --> M
   OK --> M
-  M --> A[Read-only API<br/>FastAPI on Render] --> D[Dashboard<br/>React on Vercel]
+  M --> A[Read-only API<br/>FastAPI on Vercel] --> D[Dashboard<br/>React on Vercel]
   G[GitHub Actions<br/>daily 06:00 UTC] -.-> S
 ```
 
@@ -25,5 +25,6 @@ flowchart LR
 - *Staging is in memory.* Raw rows for failing checks are persisted to `dq_failed_rows` (capped per check), which keeps the metadata DB small.
 
 **Deployment shape.** GitHub Actions generates the day's simulated batch and runs the pipeline against Neon
-Postgres. Render serves the read-only API from the same database; Vercel serves the static dashboard.
+Postgres. One Vercel project with two services (see `vercel.json`) serves the read-only FastAPI backend under
+`/api/*` and the static React dashboard on `/`, on a single origin (no CORS).
 `etl/db.py` hides the SQLite/Postgres differences (placeholders, transactions, driver) behind one small class.

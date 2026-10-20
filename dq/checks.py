@@ -7,7 +7,8 @@ Rules of this module:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+import statistics
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -17,8 +18,9 @@ class Context:
     raw: pd.DataFrame                 # file contents exactly as delivered (strings)
     typed: pd.DataFrame               # same rows cast to contract types (bad values -> NaN/NaT, not fixed)
     columns: dict                     # contract columns {name: type}
-    history: list[int]                # source row counts of recent successful batches
+    history: list[tuple[date, int]]   # (batch_date, source rows) of earlier successful batches, newest first
     as_of: datetime                   # reference "now" for freshness
+    batch_date: date | None = None    # the batch being checked (needed for weekday-aware baselines)
 
 
 @dataclass
@@ -131,18 +133,30 @@ def regex(spec, ctx: Context) -> Outcome:
 
 @check("row_count_band")
 def row_count_band(spec, ctx: Context) -> Outcome:
+    """Batch size must stay within +/- tolerance of the median of recent comparable batches.
+
+    seasonality: weekday -> compare with the same weekday (Mondays with Mondays) once at least
+    `min_history` such batches exist; until then, fall back to the last `window` batches of any day.
+    The median (not the mean) keeps one freak day, such as a Black Friday spike, from skewing the baseline.
+    """
     n = len(ctx.raw)
     if n == 0:
         return Outcome(False, "at least 1 row", "0 rows", message="empty batch")
-    hist = ctx.history[: spec.get("window", 7)]
-    if len(hist) < spec.get("min_history", 3):
+    window, min_hist = spec.get("window", 7), spec.get("min_history", 3)
+    hist, label = [rows for _, rows in ctx.history][:window], "recent"
+    if spec.get("seasonality") == "weekday" and ctx.batch_date is not None:
+        same = [rows for d, rows in ctx.history if d.weekday() == ctx.batch_date.weekday()][:window]
+        if len(same) >= min_hist:
+            hist, label = same, f"same-weekday ({ctx.batch_date:%A})"
+    if len(hist) < min_hist:
         return Outcome(None, "needs history", f"{len(hist)} prior batches",
-                       message=f"skipped: only {len(hist)} prior successful batches (need {spec.get('min_history', 3)})")
-    mean, tol = sum(hist) / len(hist), spec["tolerance"]
-    lo, hi = mean * (1 - tol), mean * (1 + tol)
+                       message=f"skipped: only {len(hist)} prior successful batches (need {min_hist})")
+    base, tol = statistics.median(hist), spec["tolerance"]
+    lo, hi = base * (1 - tol), base * (1 + tol)
     ok = lo <= n <= hi
-    return Outcome(ok, f"{lo:,.0f} to {hi:,.0f} rows (avg {mean:,.0f} +/-{tol:.0%})", f"{n:,} rows",
-                   message="" if ok else f"{n:,} rows is {(n - mean) / mean:+.0%} vs trailing average {mean:,.0f}")
+    return Outcome(ok, f"{lo:,.0f} to {hi:,.0f} rows (median {base:,.0f} of last {len(hist)} {label} batches, +/-{tol:.0%})",
+                   f"{n:,} rows",
+                   message="" if ok else f"{n:,} rows is {(n - base) / base:+.0%} vs the {label} median of {base:,.0f}")
 
 
 @check("freshness")

@@ -9,7 +9,9 @@
 - Postgres here is a stand-in for a real EDWH (Snowflake/BigQuery/Redshift): the pipeline logic carries over, but the loader (`executemany`) is sized for tens of thousands of rows per batch; use `COPY`/bulk loaders beyond ~100k.
 - The scheduled run generates its own simulated batch. A real deployment replaces `simulator.generate` with the real delivery (file drop, API pull) and keeps everything after it.
 - The API connects with the same credentials as the ETL. It only issues SELECTs, but production should give it a read-only database role.
-- The volume band is a simple trailing average and ignores weekly seasonality (weekends ~28% lower); it can false-alarm on unusual days and is skipped for the first 3 batches.
+- The volume band uses the median of recent same-weekday batches. It cannot know about holidays or promotions (a genuine Black Friday spike is flagged, by design, with a hint to confirm), and it is skipped until 3 comparable batches exist.
+- Run history is not partitioned by dataset: use one database per dataset (see `docs/real-data.md`).
+- The loader writes to one fixed target table shape (`fact_orders`); a new dataset with different columns needs its own target table.
 - Uniqueness is checked within a batch only, not against rows already in the target (a cross-batch duplicate surfaces as a load ERROR).
 - Failing-row storage is capped (100 per check) and email format is a basic pattern, not full RFC validation.
 - No authentication on the dashboard/API (data is simulated; add auth before exposing real data).
