@@ -1,4 +1,5 @@
 """End-to-end tests: happy path, every failure path, idempotency and rollback."""
+import json
 import unittest
 
 from etl.load import load
@@ -49,6 +50,16 @@ class PipelineTests(unittest.TestCase):
         n = self.env.db.one("SELECT COUNT(*) AS n FROM dq_failed_rows WHERE run_id=? AND check_name='amount_in_range'",
                             (s.run_id,))["n"]
         self.assertGreater(n, 0)
+
+    def test_stored_failing_rows_are_strict_json_even_with_empty_cells(self):
+        self.env.seed_history(4)
+        s = self.env.run(5, defects=["null_customer"])
+        rows = self.env.db.query("SELECT row_json FROM dq_failed_rows WHERE run_id=? AND check_name=?",
+                                 (s.run_id, "required_fields_not_null"))
+        parsed = [json.loads(r["row_json"], parse_constant=lambda c: self.fail(f"non-JSON constant {c}"))
+                  for r in rows]
+        self.assertTrue(parsed)
+        self.assertTrue(all(p["customer_id"] is None for p in parsed))
 
     def test_warning_check_loads_but_is_flagged(self):
         self.env.seed_history(4)

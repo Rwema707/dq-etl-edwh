@@ -2,6 +2,15 @@ import { useEffect, useState } from "react";
 import { getJSON } from "../api.js";
 import { num } from "../format.js";
 
+// Rows stored by older versions may contain bare NaN (not valid JSON): read them as null.
+function parseRow(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(text.replace(/\bNaN\b/g, "null"));
+  }
+}
+
 export default function FailedRows({ runId, check, total }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
@@ -9,7 +18,7 @@ export default function FailedRows({ runId, check, total }) {
   useEffect(() => {
     let cancelled = false;
     getJSON(`/api/runs/${runId}/failures?check=${encodeURIComponent(check)}`)
-      .then((r) => !cancelled && setRows(r.map((x) => ({ line: x.csv_line, ...JSON.parse(x.row_json) }))))
+      .then((r) => !cancelled && setRows(r.map((x) => ({ line: x.csv_line, ...parseRow(x.row_json) }))))
       .catch((e) => !cancelled && setError(e.message));
     return () => { cancelled = true; };
   }, [runId, check]);

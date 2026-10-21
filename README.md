@@ -4,6 +4,10 @@ One source dataset (`orders`) → one warehouse table (`fact_orders`), with data
 **before** anything is loaded. Bad data is blocked, quarantined for diagnosis, reported loudly, and
 never silently fixed. A dashboard lets a non-engineer see data health without reading code.
 
+> **Proposal summary with screenshots and evidence:** [`docs/proposal.md`](docs/proposal.md)
+
+![Dashboard](docs/images/dashboard-overview.png)
+
 ## What it does
 1. **Extract** the day's batch file exactly as delivered.
 2. **Check** it against a data contract (`contracts/orders.yaml`): correctness, completeness, freshness.

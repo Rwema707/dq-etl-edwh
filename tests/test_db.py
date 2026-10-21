@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest import mock
 
-from etl.db import Database, Rollback, connect, init_db, is_postgres
+from etl.db import Database, Rollback, connect, init_db, is_postgres, resolve_target
 
 
 class FakeConn:
@@ -48,6 +49,29 @@ class AdapterTests(unittest.TestCase):
             text = (SQL_DIR / f"schema.{dialect}.sql").read_text()
             for t in TABLES:
                 self.assertIn(f"CREATE TABLE IF NOT EXISTS {t} ", text, f"{t} missing in {dialect}")
+
+
+class ResolveTargetTests(unittest.TestCase):
+    ENV = {"API_DATABASE_URL": "postgresql://reader@h/db", "DATABASE_URL": "postgresql://owner@h/db",
+           "DQ_DB_PATH": "local.db"}
+
+    def test_explicit_target_always_wins(self):
+        with mock.patch.dict("os.environ", self.ENV, clear=True):
+            self.assertEqual(resolve_target("x.db", readonly=True), "x.db")
+
+    def test_read_only_callers_prefer_the_api_credentials(self):
+        with mock.patch.dict("os.environ", self.ENV, clear=True):
+            self.assertEqual(resolve_target(readonly=True), "postgresql://reader@h/db")
+
+    def test_the_etl_never_uses_the_read_only_credentials(self):
+        with mock.patch.dict("os.environ", self.ENV, clear=True):
+            self.assertEqual(resolve_target(), "postgresql://owner@h/db")
+
+    def test_falls_back_to_database_url_then_local_file(self):
+        with mock.patch.dict("os.environ", {"DATABASE_URL": "postgresql://owner@h/db"}, clear=True):
+            self.assertEqual(resolve_target(readonly=True), "postgresql://owner@h/db")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(resolve_target(readonly=True), "data/edwh.db")
 
 
 class TransactionTests(unittest.TestCase):

@@ -12,6 +12,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
+import pandas as pd
+
 from dq.checks import Context, InfrastructureError
 from dq.contract import load_contract
 from dq.engine import CheckResult, run_checks
@@ -81,6 +83,12 @@ def _target_key_lookup(db: Database, contract: dict, batch_date: date):
     return lookup
 
 
+def _row_json(row: pd.Series) -> str:
+    """A delivered row as strict JSON. Empty cells become null: NaN is not valid JSON and would make
+    the stored row unreadable in the dashboard."""
+    return json.dumps({k: (None if pd.isna(v) else v) for k, v in row.items()}, allow_nan=False)
+
+
 def _persist(db: Database, run_id: str, results: list[CheckResult], raw, max_rows: int, start_pos: int = 0) -> None:
     for pos, r in enumerate(results, start=start_pos):
         db.execute("INSERT INTO dq_check_results (run_id, position, check_name, check_type, pillar, severity,"
@@ -91,7 +99,7 @@ def _persist(db: Database, run_id: str, results: list[CheckResult], raw, max_row
             with db.transaction():
                 db.executemany(
                     "INSERT INTO dq_failed_rows (run_id, check_name, csv_line, row_json) VALUES (?,?,?,?)",
-                    [(run_id, r.name, int(i) + 2, json.dumps(raw.loc[i].where(raw.loc[i].notna(), None).to_dict()))
+                    [(run_id, r.name, int(i) + 2, _row_json(raw.loc[i]))
                      for i in r.failed_idx[:max_rows]])
 
 

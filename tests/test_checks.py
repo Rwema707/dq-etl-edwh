@@ -105,6 +105,23 @@ class CheckTests(unittest.TestCase):
         naive = {**spec, "seasonality": None}
         self.assertTrue(CHECKS["row_count_band"](naive, ctx([GOOD[0]] * 20, history=other)).passed)
 
+    def test_known_event_replaces_the_normal_band_only_on_its_date(self):
+        event = {"date": BATCH.isoformat(), "note": "Black Friday", "factor": [2, 5]}
+        spec = {"tolerance": 0.3, "window": 7, "min_history": 3, "known_events": [event]}
+        history = [10, 10, 10]                                      # baseline median 10
+        spike = [GOOD[0]] * 30                                      # 3x: far outside +/-30%
+        self.assertTrue(CHECKS["row_count_band"](spec, ctx(spike, history=history)).passed)   # expected spike
+        o = CHECKS["row_count_band"](spec, ctx(spike, history=history))
+        self.assertIn("Black Friday", o.expected)
+        normal = {**spec, "known_events": []}
+        self.assertFalse(CHECKS["row_count_band"](normal, ctx(spike, history=history)).passed)  # same data, no event
+        tiny = [GOOD[0]] * 12                                       # 1.2x: normal day volume, below the event's 2x floor
+        o = CHECKS["row_count_band"](spec, ctx(tiny, history=history))
+        self.assertFalse(o.passed)
+        self.assertIn("expected range for Black Friday", o.message)
+        other_day = {**spec, "known_events": [{**event, "date": "2026-01-01"}]}
+        self.assertFalse(CHECKS["row_count_band"](other_day, ctx(spike, history=history)).passed)
+
     def test_row_count_weekday_mode_falls_back_when_too_few_same_weekdays(self):
         spec = {"tolerance": 0.3, "window": 4, "min_history": 3, "seasonality": "weekday"}
         o = CHECKS["row_count_band"](spec, ctx(GOOD, history=[2, 2, 2]))   # consecutive days: only one is a Wednesday-match at most
@@ -173,6 +190,17 @@ class ContractTests(unittest.TestCase):
                         "checks: [{name: n, type: magic, pillar: correctness, severity: blocking}]\n")
         with self.assertRaisesRegex(ValueError, "unknown type"):
             load_contract(p)
+
+    def test_malformed_known_event_rejected(self):
+        base = ("dataset: d\nsource: {}\ntarget: {}\ncolumns: {a: string}\nchecks:\n"
+                "  - {name: n, type: row_count_band, tolerance: 0.3, pillar: completeness, severity: blocking,\n"
+                "     known_events: [%s]}\n")
+        for bad in ('{date: "2017-13-45", note: x, factor: [1, 2]}',      # impossible date
+                    '{date: "2017-11-24", note: x, factor: [3, 2]}',      # lo > hi
+                    '{date: "2017-11-24", factor: [1, 2]}',               # no note
+                    '{date: "2017-11-24", note: x, factor: [0, 2]}'):     # non-positive factor
+            with self.assertRaisesRegex(ValueError, "known_event"):
+                load_contract(self._write(base % bad))
 
     def test_bad_severity_rejected(self):
         p = self._write("dataset: d\nsource: {}\ntarget: {}\ncolumns: {a: string}\n"

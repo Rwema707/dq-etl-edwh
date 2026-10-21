@@ -44,6 +44,17 @@ or truncated downloads are rejected by row count (99,441 orders, 99,441 customer
 > **Dataset** picker (shown when more than one exists; `?dataset=olist_orders` in the URL opens one directly).
 > Without a choice, it shows the dataset that ran most recently.
 
+## Declaring expected spikes (`known_events`)
+A real spike such as Black Friday is not an incident, so the volume check lets a contract declare it:
+```yaml
+known_events:
+  - date: "2017-11-24"
+    note: Black Friday
+    factor: [1.5, 8.0]     # on that date the batch must be 1.5x to 8x the usual volume
+```
+On that date the normal +/-35% band is replaced by the declared range, so a *missing* spike (a half-loaded
+Black Friday) is still caught. The shipped range is deliberately generous: replay November 2017 once and tighten it.
+
 ## Good date ranges
 | Range | What you get |
 |---|---|

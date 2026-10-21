@@ -10,7 +10,7 @@
 | 5 | status_accepted | Correctness | Blocking | status in 5 known values | Typos, unannounced new statuses |
 | 6 | email_format | Correctness | **Warning** | Matches a basic email pattern | Malformed emails (not used for joins) |
 | 7 | required_fields_not_null | Completeness | Blocking | order_id, customer_id, amount, status, order_ts non-null | Broken upstream joins |
-| 8 | row_count_in_band | Completeness | Blocking | Within ±30% of the median of the last 4 **same-weekday** batches (falls back to the last 4 batches of any day until 3 same-weekday batches exist; needs ≥3 batches) | Partial extracts, outages |
+| 8 | row_count_in_band | Completeness | Blocking | Within ±30% of the median of the last 4 **same-weekday** batches (falls back to the last 4 batches of any day until 3 same-weekday batches exist; needs ≥3 batches). Contracts can declare `known_events` (e.g. Black Friday) whose date uses an expected multiple of the baseline instead | Partial extracts, outages |
 | 9 | freshness_within_sla | Freshness | Blocking | Newest order_ts ≤ 24h old at run time | Stale or re-delivered data |
 | 10 | source_equals_loaded | Completeness | Blocking | Rows in target = rows in source after load | Load bugs; triggers rollback |
 | – | source_available | Freshness | Blocking | Batch file exists | Missing delivery |
