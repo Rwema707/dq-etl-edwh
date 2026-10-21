@@ -26,6 +26,10 @@ Also run `cd dashboard && npm install` once and commit the generated `package-lo
 1. neon.tech → new project → copy the **connection string** (`postgresql://user:pass@ep-….neon.tech/neondb?sslmode=require`).
    For Vercel, prefer the **pooled** connection string (host contains `-pooler`): serverless functions open many short connections.
 2. No manual SQL needed: every ETL run executes `sql/schema.postgres.sql` (idempotent).
+3. **Create the read-only role for the web API (recommended).** After the first ETL run has created the tables,
+   open Neon's SQL editor and run `sql/readonly_role.sql` (replace `CHANGE_ME_PASSWORD` first). The role `dq_reader`
+   can read only the three run-history tables: it cannot write, and cannot even see `fact_orders`. Build its
+   connection string by copying the owner's string and swapping in `dq_reader` and the new password.
 
 ## 3. Give GitHub the secrets
 **Settings → Secrets and variables → Actions → New repository secret**
@@ -48,7 +52,9 @@ Want real data on the dashboard instead of simulated? See `docs/real-data.md` (w
 1. vercel.com → **Add New → Project** → import the repo. Leave **Root Directory** as the repository root.
 2. In the project's **Build & Development Settings**, set **Framework Preset to "Services"**. Per Vercel's docs, a
    project only builds as services when that preset is selected *and* `vercel.json` has a `services` key.
-3. **Environment Variables:** add `DATABASE_URL` (the same Neon string). Do **not** set `VITE_API_BASE`: the
+3. **Environment Variables:** add `API_DATABASE_URL` = the **read-only** `dq_reader` connection string (if you
+   skipped the role, use `DATABASE_URL` with the owner's string instead). Vercel then never holds write credentials:
+   those live only in the GitHub `DATABASE_URL` secret used by the ETL. Do **not** set `VITE_API_BASE`: the
    dashboard calls `/api/...` on its own origin, so no CORS setup is needed.
 4. Deploy. Check:
    - `https://<project>.vercel.app/` → dashboard
@@ -81,7 +87,7 @@ that database; point it at a scratch database, never at production**).
 |---|---|
 | Vercel builds only the dashboard (or one service) | Framework Preset is not "Services", or `vercel.json` is not at the repo root |
 | Dashboard says "Cannot reach the API" | `/api/*` rewrite not applied (same cause as above); or `VITE_API_BASE` was set and points elsewhere |
-| `/api/health` returns 503 | `DATABASE_URL` missing/wrong in Vercel, or the ETL has never run |
+| `/api/health` returns 503 | `API_DATABASE_URL` (or `DATABASE_URL`) missing/wrong in Vercel, the `dq_reader` password is wrong, or the ETL has never run |
 | Python service fails to start | Confirm the entrypoint `api.app:app` imports locally: `python -c "import api.app"` |
 | Browser console shows a CORS error | Only when hosting API and dashboard on different origins: `CORS_ORIGINS` must match the dashboard URL exactly |
 | Workflow fails at "Check configuration" | `DATABASE_URL` secret not set in GitHub |

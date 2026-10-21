@@ -65,9 +65,13 @@ checks:
     window: 4
     min_history: 3
     seasonality: weekday
+    known_events:                # expected spikes: on these dates the batch must be lo-hi times the usual volume
+      - date: "2017-11-24"
+        note: Black Friday
+        factor: [1.5, 8.0]       # generous on purpose: tune after your first replay of November 2017
     pillar: completeness
     severity: blocking
-    hint: "Batch size is far from the usual for this weekday. Genuine spikes (Black Friday) look like this too: confirm with the business before overriding."
+    hint: "Batch size is far from the usual for this weekday. Genuine spikes look like this too: add them under known_events (with the business's expected range) instead of loosening the whole band."
   - name: freshness_within_sla
     type: freshness
     column: order_ts

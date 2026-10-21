@@ -4,7 +4,9 @@ Write SQL with `?` placeholders; the adapter rewrites them for Postgres. All rea
 list[dict]. Pick the backend with a URL or path:
     postgresql://user:pass@host/db   -> PostgreSQL (psycopg 3)
     anything else                    -> SQLite file path
-Resolution order: explicit argument, $DATABASE_URL, $DQ_DB_PATH, data/edwh.db.
+Resolution order: explicit argument, then (read-only callers such as the API only) $API_DATABASE_URL,
+then $DATABASE_URL, $DQ_DB_PATH, data/edwh.db. $API_DATABASE_URL should hold a read-only role
+(see sql/readonly_role.sql) so the web tier never holds write credentials.
 """
 from __future__ import annotations
 
@@ -110,10 +112,19 @@ def is_postgres(target: str) -> bool:
     return target.startswith(("postgres://", "postgresql://"))
 
 
+def resolve_target(target: str | None = None, readonly: bool = False) -> str:
+    if target:
+        return target
+    if readonly and os.environ.get("API_DATABASE_URL"):
+        return os.environ["API_DATABASE_URL"]
+    return os.environ.get("DATABASE_URL") or os.environ.get("DQ_DB_PATH", "data/edwh.db")
+
+
 def connect(target: str | None = None, readonly: bool = False) -> Database:
-    target = target or os.environ.get("DATABASE_URL") or os.environ.get("DQ_DB_PATH", "data/edwh.db")
+    target = resolve_target(target, readonly)
     if is_postgres(target):
-        import psycopg  # imported lazily so SQLite-only use needs no driver
+        # imported lazily so SQLite-only use needs no driver
+        import psycopg
         from psycopg.rows import dict_row
         # prepare_threshold=None: poolers such as Neon's PgBouncer do not support prepared statements.
         conn = psycopg.connect(target, autocommit=True, row_factory=dict_row, prepare_threshold=None)

@@ -162,6 +162,8 @@ def row_count_band(spec, ctx: Context) -> Outcome:
     seasonality: weekday -> compare with the same weekday (Mondays with Mondays) once at least
     `min_history` such batches exist; until then, fall back to the last `window` batches of any day.
     The median (not the mean) keeps one freak day, such as a Black Friday spike, from skewing the baseline.
+    known_events: [{date, note, factor: [lo, hi]}] declares expected spikes/dips: on that date the batch must
+    be lo to hi times the baseline instead of +/- tolerance, so a genuine promotion is expected, not flagged.
     """
     n = len(ctx.raw)
     if n == 0:
@@ -176,11 +178,27 @@ def row_count_band(spec, ctx: Context) -> Outcome:
         return Outcome(None, "needs history", f"{len(hist)} prior batches",
                        message=f"skipped: only {len(hist)} prior successful batches (need {min_hist})")
     base, tol = statistics.median(hist), spec["tolerance"]
-    lo, hi = base * (1 - tol), base * (1 + tol)
+    event = _known_event(spec, ctx)
+    if event:                                   # a declared spike/dip replaces the normal band for that date
+        f_lo, f_hi = event["factor"]
+        lo, hi, rule = base * f_lo, base * f_hi, f"{event['note']}: {f_lo:g}x to {f_hi:g}x"
+    else:
+        lo, hi, rule = base * (1 - tol), base * (1 + tol), f"+/-{tol:.0%}"
     ok = lo <= n <= hi
-    return Outcome(ok, f"{lo:,.0f} to {hi:,.0f} rows (median {base:,.0f} of last {len(hist)} {label} batches, +/-{tol:.0%})",
-                   f"{n:,} rows",
-                   message="" if ok else f"{n:,} rows is {(n - base) / base:+.0%} vs the {label} median of {base:,.0f}")
+    if ok:
+        msg = ""
+    elif event:
+        msg = f"{n:,} rows is outside the expected range for {event['note']} ({f_lo:g}x to {f_hi:g}x of {base:,.0f})"
+    else:
+        msg = f"{n:,} rows is {(n - base) / base:+.0%} vs the {label} median of {base:,.0f}"
+    return Outcome(ok, f"{lo:,.0f} to {hi:,.0f} rows (median {base:,.0f} of last {len(hist)} {label} batches, {rule})",
+                   f"{n:,} rows", message=msg)
+
+
+def _known_event(spec: dict, ctx: Context) -> dict | None:
+    if ctx.batch_date is None:
+        return None
+    return next((e for e in spec.get("known_events", []) if str(e["date"]) == ctx.batch_date.isoformat()), None)
 
 
 @check("freshness")
