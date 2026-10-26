@@ -1,0 +1,13 @@
+# Lint settings. These live here (not in pyproject.toml) on purpose: Vercel prefers a pyproject.toml over
+# requirements.txt when installing Python dependencies, so a pyproject.toml without dependencies breaks the deploy.
+line-length = 110
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "B"]
+# Long lines are tolerated in error messages and SQL strings (the project has no auto-formatter).
+ignore = ["E501"]
+
+[lint.flake8-bugbear]
+# FastAPI dependency/query declarations are meant to be function calls in argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
